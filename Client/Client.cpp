@@ -41,7 +41,7 @@ int main(int argc, char *argv[]) {
         return -1;
     }
 
-    std::cout << "server address = " << (server->h_addr_list[0][0] & 0xff) << "." <<
+    std::cout << "connecting to server address = " << (server->h_addr_list[0][0] & 0xff) << "." <<
               (server->h_addr_list[0][1] & 0xff) << "." <<
               (server->h_addr_list[0][2] & 0xff) << "." <<
               (server->h_addr_list[0][3] & 0xff) << ", port " <<
@@ -55,25 +55,29 @@ int main(int argc, char *argv[]) {
     //connect to server
     if((connect(sockfd,(struct sockaddr *)&serv_addr,sizeof(serv_addr))) < 0)
             error("ERROR on connecting");
-
-    //receive message from server
-    char buffer[256];
-
     std::cout <<"Server connected, reading from server..."<<std::endl;
 
-    if(recv(sockfd,&buffer,sizeof(buffer),0) < 0)
-        error("ERROR receiving message from server");
+    char buffer[256];
+    do
+    {
+        //clear buffer and get message from server
+        std::memset(&buffer,0,sizeof(buffer));
 
-    std::cout <<"Server message: "<<buffer<<std::endl;
+        if(recv(sockfd,&buffer,sizeof(buffer),0) < 0)
+            error("ERROR receiving message from server");
 
-    //clear buffer and send message to server
-    std::memset(&buffer,0,sizeof(buffer));
+        std::cout <<"Server message: "<<buffer<<std::endl;
 
-    std::cout <<"Enter message to send to server: "<<std::endl;
-    std::cin >> buffer;
+        //clear buffer and send message to server
+        std::memset(&buffer,0,sizeof(buffer));
 
-    if(send(sockfd,&buffer,sizeof(buffer),0) < 0)
-        error("ERROR sending message to server");
+        std::cout <<"Enter message to send to server: "<<std::endl;
+        std::cin.getline(buffer,sizeof(buffer));
+
+        if(send(sockfd,&buffer,sizeof(buffer),0) < 0)
+            error("ERROR sending message to server");
+
+    }while(std::strcmp(buffer,"quit") != 0);
 
     close(sockfd);
 }
