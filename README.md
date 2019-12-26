@@ -3,4 +3,4 @@ C++ Server-Client application
 
 A C++ TCP-based server client application.
 
-TODO: Client side using *hostent and gethostbyname() need to be replaced by getaddrinfo.
+TODO: The method of Client side getting Server info by using *hostent and gethostbyname() need to be improved and replaced by getaddrinfo.
