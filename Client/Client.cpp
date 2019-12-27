@@ -58,8 +58,7 @@ int main(int argc, char *argv[]) {
     std::cout <<"Server connected, reading from server..."<<std::endl;
 
     char buffer[256];
-    do
-    {
+    while(true) {
         //clear buffer and get message from server
         std::memset(&buffer,0,sizeof(buffer));
 
@@ -74,10 +73,15 @@ int main(int argc, char *argv[]) {
         std::cout <<"Enter message to send to server: "<<std::endl;
         std::cin.getline(buffer,sizeof(buffer));
 
-        if(send(sockfd,&buffer,sizeof(buffer),0) < 0)
-            error("ERROR sending message to server");
+        if(std::strcmp(buffer,"quit") == 0)
+            break;
 
-    }while(std::strcmp(buffer,"quit") != 0);
+        if(std::strcmp(buffer,"") != 0){
+            if(send(sockfd,&buffer,sizeof(buffer),0) < 0)
+                error("ERROR sending message to server");
+        }
+
+    }
 
     close(sockfd);
 }
