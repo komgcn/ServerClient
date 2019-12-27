@@ -4,5 +4,5 @@ project(ServerClient)
 set(CMAKE_CXX_STANDARD 11)
 SET(CMAKE_CXX_FLAGS -pthread)
 
-add_subdirectory(Server)
-add_subdirectory(Client)
+add_subdirectory(TCP)
+add_subdirectory(UDP)
