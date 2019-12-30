@@ -31,6 +31,7 @@ void *get_in_addr(struct sockaddr *sa)
     return &(((struct sockaddr_in6*)sa)->sin6_addr);
 }
 
+//create and bind server socket, start listening
 int getServerFD(const char *port){
 
     addrinfo hint,*result,*rptr;
@@ -130,7 +131,7 @@ int main(int argc, char *argv[]){
             error("ERROR on polling");
 
         for(size_t i = 0; i < fd_count; ++i){
-            if(fds[i].revents & POLLIN){
+            if(fds[i].revents & POLLIN){ //data ready to be read
                 if(fds[i].fd == serv_fd){ //if it's the server, handle new connection
 
                     newfd = accept(serv_fd,(struct sockaddr*)&client_addr,&client_addr_len);
@@ -138,6 +139,8 @@ int main(int argc, char *argv[]){
                         error("ERROR on accepting client");
                     else {
                         add_to_fds(&newfd, fds, &fd_count, &fd_size);
+                        if(send(newfd,"Welcome to Azeroth!",256,0) == -1)
+                            error("ERROR sending");
                         std::cout << "Pollserver: new connection from "
                                   << inet_ntop(client_addr.ss_family, get_in_addr((sockaddr *) &client_addr), clientIP,
                                                INET6_ADDRSTRLEN) << " socket " << newfd << std::endl;
@@ -155,7 +158,7 @@ int main(int argc, char *argv[]){
                         close(clientfd);
                         del_from_fds(i,fds,&fd_count);
                     }else{
-                        std::cout << "Received message: "<<buffer<<":"<<clientfd<<std::endl;
+                        std::cout << "Received message: "<<buffer<<". From socket: "<<clientfd<<std::endl;
                         if(send(clientfd,"You are not prepared!",256,0) == -1)
                             error("ERROR on sending");
                     }

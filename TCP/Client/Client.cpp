@@ -9,17 +9,32 @@
 #include <netdb.h>
 #include <cstring>
 #include <unistd.h>
+#include <arpa/inet.h>
 
 void error(const std::string &msg) {
     std::cerr << msg << std::endl;
     exit(0);
 }
 
+void addrerror(const std::string &msg, int code){
+    std::cerr<< msg <<" : "<<gai_strerror(code)<<std::endl;
+    exit(0);
+}
+
+void *get_in_addr(struct sockaddr *sa)
+{
+    if (sa->sa_family == AF_INET) {
+        return &(((struct sockaddr_in*)sa)->sin_addr);
+    }
+
+    return &(((struct sockaddr_in6*)sa)->sin6_addr);
+}
+
 int main(int argc, char *argv[]) {
 
-    int sockfd, port;
-    struct sockaddr_in serv_addr;
-    struct hostent *server;
+    int sockfd;
+    addrinfo hint, *result, *rptr;
+    char addr_str[INET6_ADDRSTRLEN];
 
     if(argc < 3)
     {
@@ -27,45 +42,46 @@ int main(int argc, char *argv[]) {
         return -1;
     }
 
-    port = atoi(argv[2]);
+    std::memset(&hint, 0 ,sizeof(addrinfo));
+    hint.ai_family = AF_UNSPEC;
+    hint.ai_socktype = SOCK_STREAM;
+    hint.ai_flags = AI_PASSIVE;
+    hint.ai_protocol = 0;
+    hint.ai_canonname = nullptr;
+    hint.ai_addr = nullptr;
+    hint.ai_next = nullptr;
 
-    //create socket
-    sockfd = socket(AF_INET,SOCK_STREAM,0);
-    if(sockfd < 0)
-        error("ERROR creating socket.");
+    auto addr_code = getaddrinfo(argv[1],argv[2],&hint,&result);
+    if(addr_code != 0)
+        addrerror("getaddrinfo", addr_code);
 
-    //get server info
-    server = gethostbyname(argv[1]);
-    if (server == nullptr){
-        std::cerr << "ERROR, No such host"<<std::endl;
-        return -1;
+    for(rptr = result; rptr != nullptr; rptr->ai_next){
+        sockfd = socket(rptr->ai_family,rptr->ai_socktype,rptr->ai_protocol);
+        if(sockfd == -1)
+            continue;
+        if(connect(sockfd,rptr->ai_addr,rptr->ai_addrlen) == -1){
+            close(sockfd);
+            continue;
+        }
+        break;
     }
 
-    std::cout << "connecting to server address = " << (server->h_addr_list[0][0] & 0xff) << "." <<
-              (server->h_addr_list[0][1] & 0xff) << "." <<
-              (server->h_addr_list[0][2] & 0xff) << "." <<
-              (server->h_addr_list[0][3] & 0xff) << ", port " <<
-              static_cast<int>(port) << std::endl;
+    if(rptr == nullptr){
+        error("Error connecting");
+    }
 
-    std::memset(&serv_addr,0,sizeof(serv_addr));
-    serv_addr.sin_family = AF_INET;
-    serv_addr.sin_port = htons(port);
-    std::memmove(&(serv_addr.sin_addr.s_addr), server->h_addr_list[0], 4);
+    inet_ntop(rptr->ai_family, get_in_addr(rptr->ai_addr), addr_str, INET6_ADDRSTRLEN);
+    std::cout << "Connecting to: "<< addr_str <<std::endl;
 
-    //connect to server
-    if((connect(sockfd,(struct sockaddr *)&serv_addr,sizeof(serv_addr))) < 0)
-            error("ERROR on connecting");
-    std::cout <<"Server connected, reading from server..."<<std::endl;
+    freeaddrinfo(result);
 
     char buffer[256];
     while(true) {
         //clear buffer and get message from server
         std::memset(&buffer,0,sizeof(buffer));
 
-        if(recv(sockfd,&buffer,sizeof(buffer),0) < 0)
-            error("ERROR receiving message from server");
-
-        std::cout <<"Server message: "<<buffer<<std::endl;
+        if(recv(sockfd,&buffer,sizeof(buffer),0) > 0)
+            std::cout <<"Server message: "<<buffer<<std::endl;
 
         //clear buffer and send message to server
         std::memset(&buffer,0,sizeof(buffer));
@@ -73,14 +89,11 @@ int main(int argc, char *argv[]) {
         std::cout <<"Enter message to send to server: "<<std::endl;
         std::cin.getline(buffer,sizeof(buffer));
 
-        if(std::strcmp(buffer,"quit") == 0)
+        if(std::strcmp(buffer,"exit") == 0)
             break;
-
-        if(std::strcmp(buffer,"") != 0){
+        else
             if(send(sockfd,&buffer,sizeof(buffer),0) < 0)
                 error("ERROR sending message to server");
-        }
-
     }
 
     close(sockfd);
