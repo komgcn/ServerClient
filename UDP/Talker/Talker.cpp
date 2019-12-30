@@ -16,6 +16,7 @@ int main(int argc, char *argv[]){
         std::cerr << "Usage: " << argv[0] << " hostname port" << std::endl;
     }
 
+    //Initiate struct addrinfo used for creating socket
     std::memset(&hint, 0 ,sizeof(struct addrinfo));
     hint.ai_family = AF_UNSPEC;
     hint.ai_socktype = SOCK_DGRAM;
@@ -31,6 +32,7 @@ int main(int argc, char *argv[]){
         return -1;
     }
 
+    //create socket
     for(r_ptr = result; r_ptr != nullptr; r_ptr->ai_next) {
         sockfd = socket(r_ptr->ai_family,r_ptr->ai_socktype,r_ptr->ai_protocol);
         if(sockfd == -1)
@@ -43,6 +45,7 @@ int main(int argc, char *argv[]){
         return -1;
     }
 
+    //send messages from input prompt to socket
     char buffer[1024];
     std::cout << "Ready to fire..." << std::endl;
     while(true) {

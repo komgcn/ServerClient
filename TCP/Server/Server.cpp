@@ -9,89 +9,159 @@
 #include <unistd.h>
 #include <thread>
 #include <vector>
+#include <netdb.h>
+#include <poll.h>
 
 void error(const std::string &msg){
     std::cerr<< msg <<std::endl;
     exit(0);
 }
 
-void handleConnection(int newsockfd, struct sockaddr_in cli_addr){
+void addrerror(const std::string &msg, int code){
+    std::cerr<< msg <<" : "<<gai_strerror(code)<<std::endl;
+    exit(0);
+}
 
-    std::cout << "Connection from IP "
-              << ( ( ntohl(cli_addr.sin_addr.s_addr) >> 24) & 0xff ) << "."  // High byte of address
-              << ( ( ntohl(cli_addr.sin_addr.s_addr) >> 16) & 0xff ) << "."
-              << ( ( ntohl(cli_addr.sin_addr.s_addr) >> 8) & 0xff )  << "."
-              <<   ( ntohl(cli_addr.sin_addr.s_addr) & 0xff ) << ", port "   // Low byte of addr
-              << ntohs(cli_addr.sin_port) << std::endl;
-
-    //send message to client via new socket
-    send(newsockfd, "Welcome to Azeroth!", 256, 0);
-
-    char buffer[256];
-    while(true) {
-        std::memset(&buffer, 0, sizeof(buffer));
-
-        //get message from client via new socket
-        if (recv(newsockfd, &buffer, sizeof(buffer), 0) < 0)
-            error("ERROR on receiving message from socket.");
-        else {
-            if (std::strcmp(buffer,"")==0)
-                break;
-            std::cout << "Client "<<ntohs(cli_addr.sin_port)<<": " << buffer << std::endl;
-            send(newsockfd, "You are not prepared!", 256, 0);
-        }
+void *get_in_addr(struct sockaddr *sa)
+{
+    if (sa->sa_family == AF_INET) {
+        return &(((struct sockaddr_in*)sa)->sin_addr);
     }
 
-    std::cout << ntohs(cli_addr.sin_port)<<" session ended." << std::endl;
+    return &(((struct sockaddr_in6*)sa)->sin6_addr);
+}
+
+int getServerFD(const char *port){
+
+    addrinfo hint,*result,*rptr;
+    int sockfd, addr_code;
+    int yes = 1;
+
+    std::memset(&hint, 0 ,sizeof(addrinfo));
+    hint.ai_family = AF_UNSPEC;
+    hint.ai_socktype = SOCK_STREAM;
+    hint.ai_flags = AI_PASSIVE;
+    hint.ai_protocol = 0;
+    hint.ai_addr = NULL;
+    hint.ai_canonname = NULL;
+    hint.ai_next = NULL;
+
+    addr_code = getaddrinfo(NULL, port, &hint, &result);
+    if(addr_code != 0)
+        addrerror("getaddrinfo",addr_code);
+
+    for(rptr = result; rptr != nullptr; rptr->ai_next){
+        sockfd = socket(rptr->ai_family,rptr->ai_socktype,rptr->ai_protocol);
+        if(sockfd == -1)
+            continue;
+        setsockopt(sockfd,SOL_SOCKET,SO_REUSEADDR,&yes,sizeof(int));
+        if(bind(sockfd,rptr->ai_addr,rptr->ai_addrlen) == -1){
+            close(sockfd);
+            continue;
+        }
+        break;
+    }
+
+    if(rptr == nullptr){
+        error("Error creating socket");
+    }
+
+    freeaddrinfo(result);
+
+    if(listen(sockfd,10) == -1)
+        error("Error on listening");
+
+    return sockfd;
+}
+
+//add a new socket fd to the poll fd set
+void add_to_fds(const int *newfd, pollfd *fds, int *fd_count, int *fd_size){
+
+    /*check for space, if not enough, double it*/
+    if(*fd_count == *fd_size){
+        *fd_size *= 2;
+        fds = (pollfd*)realloc(fds,sizeof(pollfd) * (*fd_size));
+    }
+    fds[*fd_count].fd = *newfd;
+    fds[*fd_count].events = POLLIN;
+
+    ++(*fd_count);
+}
+
+//remove socket fd from poll fd set
+void del_from_fds(int i, pollfd *fds, int *fd_count){
+
+    fds[i] = fds[*fd_count - 1];
+    --(*fd_count);
 }
 
 int main(int argc, char *argv[]){
 
-    int sockfd, newsockfd, port;
-    struct sockaddr_in serv_addr, cli_addr;
+    int poll_count, newfd;
+    int fd_count = 0;
+    int fd_size = 10;
+    pollfd *fds = (pollfd*)malloc(sizeof(pollfd) * fd_size);
+
+    struct sockaddr_storage client_addr;
+    socklen_t client_addr_len = sizeof(struct sockaddr_storage);
+    char clientIP[INET6_ADDRSTRLEN];
+    char buffer[1024];
 
     if(argc < 2){
-        std::cerr<< "ERROR, no port provided!" << std::endl;
+        std::cerr<< "Usage: " <<argv[0]<<" port"<< std::endl;
         return -1;
     }
 
-    //create an IPV4 TCP stream socket
-    sockfd = socket(AF_INET, SOCK_STREAM, 0);
-    if(sockfd < 0)
-        error("ERROR opening socket!");
+    int serv_fd = getServerFD(argv[1]);
 
-    //clear the server address structure
-    std::memset(&serv_addr,0,sizeof(serv_addr));
+    if(serv_fd == -1)
+        error("ERROR creating server socket");
 
-    port = atoi(argv[1]);
+    std::cout << "Listening ..."<< std::endl;
+    //add server to set and ready to read
+    fds[0].fd = serv_fd;
+    fds[0].events = POLLIN;
+    ++fd_count;
 
-    //set up the server address structure for bind()
-    serv_addr.sin_family = AF_INET;
-    serv_addr.sin_port = htons(port);
-    serv_addr.sin_addr.s_addr = htonl(INADDR_ANY);
+    while(true){
+        poll_count = poll(fds,fd_count,-1);
 
-    //bind the socket to port
-    if(bind(sockfd, (struct sockaddr*)&serv_addr,sizeof(serv_addr)) < 0)
-        error("ERROR on binding.");
+        if(poll_count == -1)
+            error("ERROR on polling");
 
-    //listen for incoming connections
-    listen(sockfd, 5);
-    std::cout <<"Start listening on address: "<<inet_ntoa(serv_addr.sin_addr)<<", port: "<<ntohs(serv_addr.sin_port)<<std::endl;
+        for(size_t i = 0; i < fd_count; ++i){
+            if(fds[i].revents & POLLIN){
+                if(fds[i].fd == serv_fd){ //if it's the server, handle new connection
 
-    socklen_t clilen = sizeof(cli_addr);
-    std::vector<std::thread> threads;
-    //accept client's incoming connection and create new socket,write client info into client address structure
-    while (newsockfd = accept(sockfd,(struct sockaddr *)&cli_addr, &clilen)){
-        if(newsockfd < 0)
-            error("ERROR on accept.");
-        threads.push_back(std::thread(&handleConnection, newsockfd, cli_addr));
+                    newfd = accept(serv_fd,(struct sockaddr*)&client_addr,&client_addr_len);
+                    if(newfd == -1)
+                        error("ERROR on accepting client");
+                    else {
+                        add_to_fds(&newfd, fds, &fd_count, &fd_size);
+                        std::cout << "Pollserver: new connection from "
+                                  << inet_ntop(client_addr.ss_family, get_in_addr((sockaddr *) &client_addr), clientIP,
+                                               INET6_ADDRSTRLEN) << " socket " << newfd << std::endl;
+
+                    }
+                }else{ //if it's client
+                    int clientfd = fds[i].fd;
+                    int byte = recv(clientfd, buffer, sizeof(buffer),0);
+                    if(byte <= 0){
+                        if(byte == 0){
+                            std::cout << "Pollserver: socket hung up: " << clientfd << std::endl;
+                        }else{
+                            error("ERROR on receving from socket "+clientfd);
+                        }
+                        close(clientfd);
+                        del_from_fds(i,fds,&fd_count);
+                    }else{
+                        std::cout << "Received message: "<<buffer<<":"<<clientfd<<std::endl;
+                        if(send(clientfd,"You are not prepared!",256,0) == -1)
+                            error("ERROR on sending");
+                    }
+                }
+            }
+        }
     }
-
-    for(size_t i = 0;i<threads.size();++i)
-        threads[i].join();
-
-    close(newsockfd);
-    close(sockfd);
-
     return 0;
 }
